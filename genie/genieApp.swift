@@ -6,12 +6,32 @@
 //
 
 import SwiftUI
+import SwiftData
 
 @main
 struct genieApp: App {
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            MainTabView()
+        }
+        .modelContainer(for: RoutineLog.self)
+    }
+}
+
+// MARK: - Main Tab View
+
+struct MainTabView: View {
+    var body: some View {
+        TabView {
+            LoggingView()
+                .tabItem {
+                    Label("Log", systemImage: "pencil.circle.fill")
+                }
+            
+            InsightsView()
+                .tabItem {
+                    Label("Insights", systemImage: "chart.bar.fill")
+                }
         }
     }
 }
