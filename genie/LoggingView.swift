@@ -11,12 +11,16 @@ import SwiftData
 struct LoggingView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \RoutineLog.timestamp, order: .reverse) private var logs: [RoutineLog]
+    @Query(sort: \RoutineSuccess.timestamp, order: .reverse) private var feedbacks: [RoutineSuccess]
     
     @State private var showingSuccessAnimation = false
     @State private var lastLoggedEvent: EventType?
     @State private var isManualMode = false
     @State private var manualSelectedEvent: EventType = .wakeUp
     @State private var manualSelectedDate: Date = Date()
+    @State private var analyticsManager = AnalyticsManager()
+    @AppStorage("highlightOutliers") private var highlightOutliers: Bool = true
+    @AppStorage("outlierThresholdMinutes") private var outlierThresholdMinutes: Int = 30
     
     var body: some View {
         NavigationStack {
@@ -25,32 +29,37 @@ struct LoggingView: View {
                     // Mode Picker
                     modePicker
                     
+                    // Feedback Alert (if recent adjustment)
+                    if let adjustment = getRecentAdjustmentAlert() {
+                        feedbackAlertCard(adjustment: adjustment)
+                    }
+                    
                     // Today's Summary Card
                     todaySummaryCard
                     
                     if isManualMode {
                         manualEntrySection
                     } else {
-                        // Event Logging Section
-                        VStack(alignment: .leading, spacing: 12) {
-                            Text("Log Your Day")
-                                .font(.headline)
-                                .foregroundStyle(.secondary)
-                                .padding(.horizontal)
-                            
-                            VStack(spacing: 12) {
-                                ForEach(EventType.allCases, id: \.self) { eventType in
-                                    EventLogButton(
-                                        eventType: eventType,
-                                        isLogged: hasLoggedToday(eventType),
-                                        lastLogTime: getLastLogTime(for: eventType),
-                                        onTap: {
-                                            logEvent(eventType)
-                                        }
-                                    )
-                                }
-                            }
+                    // Event Logging Section
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Log Your Day")
+                            .font(.headline)
+                            .foregroundStyle(.secondary)
                             .padding(.horizontal)
+                        
+                        VStack(spacing: 12) {
+                            ForEach(EventType.allCases, id: \.self) { eventType in
+                                EventLogButton(
+                                    eventType: eventType,
+                                    isLogged: hasLoggedToday(eventType),
+                                    lastLogTime: getLastLogTime(for: eventType),
+                                    onTap: {
+                                        logEvent(eventType)
+                                    }
+                                )
+                            }
+                        }
+                        .padding(.horizontal)
                         }
                     }
                     
@@ -80,6 +89,16 @@ struct LoggingView: View {
                     successAnimationOverlay
                 }
             }
+            .onAppear {
+                analyticsManager.updateLogs(logs)
+                analyticsManager.updateFeedbacks(feedbacks)
+            }
+            .onChange(of: logs) { _, newLogs in
+                analyticsManager.updateLogs(newLogs)
+            }
+            .onChange(of: feedbacks) { _, newFeedbacks in
+                analyticsManager.updateFeedbacks(newFeedbacks)
+            }
         }
     }
     
@@ -91,6 +110,80 @@ struct LoggingView: View {
         }
         .pickerStyle(.segmented)
         .padding(.horizontal)
+    }
+    
+    // MARK: - Feedback Alert Card
+    private func feedbackAlertCard(adjustment: AdaptiveAdjustment) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                Image(systemName: "lightbulb.fill")
+                    .font(.title2)
+                    .foregroundStyle(.orange)
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Schedule Adjusted")
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    
+                    Text(adjustment.reason)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+            }
+            
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Adjustment")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(adjustment.adjustmentDescription)
+                        .font(.body)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.orange)
+                }
+                
+                Spacer()
+                
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("Event")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    HStack(spacing: 4) {
+                        Image(systemName: adjustment.eventType.icon)
+                            .font(.caption)
+                        Text(adjustment.eventType.rawValue)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                }
+            }
+            .padding(.top, 4)
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(Color.orange.opacity(0.1))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(Color.orange.opacity(0.3), lineWidth: 1)
+        )
+        .padding(.horizontal)
+    }
+    
+    private func getRecentAdjustmentAlert() -> AdaptiveAdjustment? {
+        // Check for recent adjustments for key commute events
+        let commuteEvents: [EventType] = [.leavingHome, .boardingBus, .boardingSubway]
+        
+        for event in commuteEvents {
+            if let adjustment = analyticsManager.getRecentAdjustment(for: event) {
+                return adjustment
+            }
+        }
+        
+        return nil
     }
     
     // MARK: - Today's Summary Card
@@ -200,15 +293,23 @@ struct LoggingView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal)
             
-            VStack(spacing: 0) {
+            VStack(spacing: 8) {
                 ForEach(todayLogs) { log in
-                    TimelineRow(log: log)
+                    let outlierInfo = highlightOutliers ? 
+                        analyticsManager.checkIfOutlier(
+                            eventType: log.eventType,
+                            timestamp: log.timestamp,
+                            thresholdMinutes: outlierThresholdMinutes
+                        ) : OutlierInfo(
+                            isOutlier: false,
+                            deviationMinutes: 0,
+                            averageTime: nil,
+                            thresholdMinutes: outlierThresholdMinutes
+                        )
+                    
+                    TimelineRow(log: log, outlierInfo: outlierInfo)
                 }
             }
-            .background(
-                RoundedRectangle(cornerRadius: 16)
-                    .fill(Color(.systemBackground))
-            )
             .padding(.horizontal)
         }
     }
@@ -352,41 +453,94 @@ struct EventLogButton: View {
 // MARK: - Timeline Row
 struct TimelineRow: View {
     let log: RoutineLog
+    let outlierInfo: OutlierInfo
     
     var body: some View {
         HStack(spacing: 16) {
-            // Timeline dot and line
-            VStack(spacing: 0) {
+            // Icon with background
+            ZStack {
                 Circle()
-                    .fill(Color(log.eventType.accentColor))
-                    .frame(width: 12, height: 12)
+                    .fill(outlierInfo.isOutlier ? 
+                          Color.orange.opacity(0.2) : 
+                          Color(log.eventType.accentColor).opacity(0.15))
+                    .frame(width: 48, height: 48)
                 
-                Rectangle()
-                    .fill(Color(.systemGray5))
-                    .frame(width: 2, height: 40)
+                if outlierInfo.isOutlier {
+                    Circle()
+                        .strokeBorder(Color.orange, lineWidth: 2)
+                        .frame(width: 48, height: 48)
+                }
+                
+                Image(systemName: log.eventType.icon)
+                    .font(.system(size: 20))
+                    .foregroundStyle(outlierInfo.isOutlier ? 
+                                    Color.orange : 
+                                    Color(log.eventType.accentColor))
             }
-            .padding(.leading, 8)
             
             // Event info
             VStack(alignment: .leading, spacing: 4) {
-                HStack {
-                    Image(systemName: log.eventType.icon)
-                        .font(.caption)
-                        .foregroundStyle(Color(log.eventType.accentColor))
-                    
+                HStack(spacing: 6) {
                     Text(log.eventType.rawValue)
-                        .font(.subheadline)
-                        .fontWeight(.medium)
+                        .font(.body)
+                        .fontWeight(.semibold)
+                    
+                    if outlierInfo.isOutlier {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
                 }
                 
                 Text(log.formattedTime)
-                    .font(.caption)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
+                
+                if outlierInfo.isOutlier, let avgTime = outlierInfo.averageTime {
+                    HStack(spacing: 4) {
+                        Image(systemName: "clock.arrow.circlepath")
+                            .font(.caption2)
+                        Text("Usually \(avgTime.formatted(date: .omitted, time: .shortened))")
+                            .font(.caption2)
+                        Text("(±\(outlierInfo.deviationMinutes) min)")
+                            .font(.caption2)
+                            .fontWeight(.semibold)
+                    }
+                    .foregroundStyle(.orange)
+                }
             }
-            .padding(.vertical, 8)
             
             Spacer()
+            
+            // Status indicator
+            if outlierInfo.isOutlier {
+                Image(systemName: "exclamationmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.orange)
+            } else {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.title3)
+                    .foregroundStyle(.green.opacity(0.6))
+            }
         }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(outlierInfo.isOutlier ? 
+                      Color.orange.opacity(0.05) : 
+                      Color(.systemBackground))
+                .shadow(color: outlierInfo.isOutlier ? 
+                        Color.orange.opacity(0.15) : 
+                        Color.black.opacity(0.05), 
+                        radius: 4, y: 2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(outlierInfo.isOutlier ? 
+                             Color.orange.opacity(0.3) : 
+                             Color.clear, 
+                             lineWidth: 1)
+        )
     }
 }
 

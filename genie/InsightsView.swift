@@ -12,6 +12,7 @@ import Charts
 struct InsightsView: View {
     @Environment(\.modelContext) private var modelContext
     @Query(sort: \RoutineLog.timestamp, order: .reverse) private var logs: [RoutineLog]
+    @Query(sort: \RoutineSuccess.timestamp, order: .reverse) private var feedbacks: [RoutineSuccess]
     
     @State private var analyticsManager = AnalyticsManager()
     @State private var selectedDays: Int = 5
@@ -27,6 +28,11 @@ struct InsightsView: View {
                     
                     // Overall Consistency Score
                     consistencyScoreCard
+                    
+                    // Commute Success Rate (Feedback)
+                    if !analyticsManager.getAllFeedbackSummaries(days: selectedDays).isEmpty {
+                        commuteSuccessSection
+                    }
                     
                     // Event Insights Section
                     eventInsightsSection
@@ -51,10 +57,38 @@ struct InsightsView: View {
             .navigationBarTitleDisplayMode(.large)
             .onAppear {
                 analyticsManager.updateLogs(logs)
+                analyticsManager.updateFeedbacks(feedbacks)
             }
             .onChange(of: logs) { _, newLogs in
                 analyticsManager.updateLogs(newLogs)
             }
+            .onChange(of: feedbacks) { _, newFeedbacks in
+                analyticsManager.updateFeedbacks(newFeedbacks)
+            }
+        }
+    }
+    
+    // MARK: - Commute Success Section
+    
+    private var commuteSuccessSection: some View {
+        let summaries = analyticsManager.getAllFeedbackSummaries(days: selectedDays)
+        
+        return VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Image(systemName: "checkmark.seal.fill")
+                    .foregroundStyle(.green)
+                Text("Commute Success Rate")
+                    .font(.headline)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+            
+            VStack(spacing: 12) {
+                ForEach(summaries, id: \.eventType) { summary in
+                    FeedbackSummaryCard(summary: summary)
+                }
+            }
+            .padding(.horizontal)
         }
     }
     
@@ -321,6 +355,7 @@ struct EventInsightCard: View {
 
 struct DurationInsightCard: View {
     let insight: DurationInsight
+    @AppStorage("bufferTimeMinutes") private var bufferTimeMinutes: Int = 10
     
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -365,17 +400,31 @@ struct DurationInsightCard: View {
                 .frame(maxWidth: .infinity)
             }
             
-            // Range info
-            HStack {
-                Text("Range: \(insight.minDuration.minutesFormatted) - \(insight.maxDuration.minutesFormatted)")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            // Range info with buffer time
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text("Range: \(insight.minDuration.minutesFormatted) - \(insight.maxDuration.minutesFormatted)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    
+                    Spacer()
+                    
+                    Text("\(insight.samples) samples")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
                 
-                Spacer()
-                
-                Text("\(insight.samples) samples")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+                if bufferTimeMinutes > 0 {
+                    let totalMinutes = Int(insight.averageDuration / 60) + bufferTimeMinutes
+                    HStack(spacing: 4) {
+                        Image(systemName: "plus.circle.fill")
+                            .font(.caption2)
+                        Text("With buffer: \(totalMinutes) min")
+                            .font(.caption2)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundStyle(.blue)
+                }
             }
         }
         .padding()
@@ -468,7 +517,121 @@ struct DailyCompletionRow: View {
     }
 }
 
+// MARK: - Feedback Summary Card
+
+struct FeedbackSummaryCard: View {
+    let summary: FeedbackSummary
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 12) {
+                // Icon with background
+                ZStack {
+                    Circle()
+                        .fill(Color(summary.eventType.accentColor).opacity(0.15))
+                        .frame(width: 48, height: 48)
+                    
+                    Image(systemName: summary.eventType.icon)
+                        .font(.system(size: 20))
+                        .foregroundStyle(Color(summary.eventType.accentColor))
+                }
+                
+                // Event name and status
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(summary.eventType.rawValue)
+                        .font(.body)
+                        .fontWeight(.semibold)
+                    
+                    HStack(spacing: 4) {
+                        Text(summary.emoji)
+                        Text(summary.statusMessage)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                
+                Spacer()
+                
+                // Success rate
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(summary.successPercentage)%")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                        .foregroundStyle(successRateColor(for: summary.successRate))
+                    
+                    Text("success rate")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            
+            // Stats breakdown
+            HStack(spacing: 20) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Attempts")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("\(summary.totalAttempts)")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                }
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Caught")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("\(summary.successCount)")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.green)
+                }
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Missed")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("\(summary.failureCount)")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.red)
+                }
+                
+                Spacer()
+            }
+            
+            // Success rate bar
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color(.systemGray5))
+                        .frame(height: 6)
+                    
+                    Capsule()
+                        .fill(successRateColor(for: summary.successRate))
+                        .frame(width: geometry.size.width * summary.successRate, height: 6)
+                }
+            }
+            .frame(height: 6)
+        }
+        .padding()
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color(.systemBackground))
+                .shadow(color: .black.opacity(0.05), radius: 4, y: 1)
+        )
+    }
+    
+    private func successRateColor(for rate: Double) -> Color {
+        switch rate {
+        case 0.9...: return .green
+        case 0.7..<0.9: return .blue
+        case 0.5..<0.7: return .orange
+        default: return .red
+        }
+    }
+}
+
 #Preview {
     InsightsView()
-        .modelContainer(for: RoutineLog.self, inMemory: true)
+        .modelContainer(for: [RoutineLog.self, RoutineSuccess.self], inMemory: true)
 }

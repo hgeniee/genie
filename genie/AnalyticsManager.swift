@@ -41,18 +41,31 @@ struct RoutineSuggestion {
     let reasoning: String
 }
 
+struct OutlierInfo {
+    let isOutlier: Bool
+    let deviationMinutes: Int
+    let averageTime: Date?
+    let thresholdMinutes: Int
+}
+
 // MARK: - Analytics Manager
 
 @Observable
 class AnalyticsManager {
     private var logs: [RoutineLog] = []
+    private var feedbacks: [RoutineSuccess] = []
     
-    init(logs: [RoutineLog] = []) {
+    init(logs: [RoutineLog] = [], feedbacks: [RoutineSuccess] = []) {
         self.logs = logs
+        self.feedbacks = feedbacks
     }
     
     func updateLogs(_ logs: [RoutineLog]) {
         self.logs = logs
+    }
+    
+    func updateFeedbacks(_ feedbacks: [RoutineSuccess]) {
+        self.feedbacks = feedbacks
     }
     
     // MARK: - Daily Grouping
@@ -276,6 +289,261 @@ class AnalyticsManager {
         
         let totalConsistency = insights.map { $0.consistency }.reduce(0, +)
         return totalConsistency / Double(insights.count)
+    }
+    
+    // MARK: - Outlier Detection
+    
+    func checkIfOutlier(
+        eventType: EventType,
+        timestamp: Date,
+        thresholdMinutes: Int = 30,
+        days: Int = 7
+    ) -> OutlierInfo {
+        guard let insight = getEventInsight(for: eventType, days: days),
+              let averageTime = insight.averageTime,
+              insight.occurrenceCount >= 3 else {
+            // Not enough data to determine outlier status
+            return OutlierInfo(
+                isOutlier: false,
+                deviationMinutes: 0,
+                averageTime: nil,
+                thresholdMinutes: thresholdMinutes
+            )
+        }
+        
+        let calendar = Calendar.current
+        
+        // Extract time components (hour and minute) from both dates
+        let avgComponents = calendar.dateComponents([.hour, .minute], from: averageTime)
+        let timestampComponents = calendar.dateComponents([.hour, .minute], from: timestamp)
+        
+        guard let avgHour = avgComponents.hour,
+              let avgMinute = avgComponents.minute,
+              let tsHour = timestampComponents.hour,
+              let tsMinute = timestampComponents.minute else {
+            return OutlierInfo(
+                isOutlier: false,
+                deviationMinutes: 0,
+                averageTime: averageTime,
+                thresholdMinutes: thresholdMinutes
+            )
+        }
+        
+        // Convert to minutes from midnight
+        let avgMinutesFromMidnight = avgHour * 60 + avgMinute
+        let tsMinutesFromMidnight = tsHour * 60 + tsMinute
+        
+        // Calculate deviation
+        var deviation = tsMinutesFromMidnight - avgMinutesFromMidnight
+        
+        // Handle day wrap-around (e.g., bedtime near midnight)
+        if abs(deviation) > 720 { // 12 hours
+            if deviation > 0 {
+                deviation = deviation - 1440 // Subtract 24 hours
+            } else {
+                deviation = deviation + 1440 // Add 24 hours
+            }
+        }
+        
+        let deviationMinutes = abs(deviation)
+        let isOutlier = deviationMinutes >= thresholdMinutes
+        
+        return OutlierInfo(
+            isOutlier: isOutlier,
+            deviationMinutes: deviationMinutes,
+            averageTime: averageTime,
+            thresholdMinutes: thresholdMinutes
+        )
+    }
+    
+    func getOutlierLogs(days: Int = 5, thresholdMinutes: Int = 30) -> [RoutineLog] {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        var outlierLogs: [RoutineLog] = []
+        
+        for dayOffset in 0..<days {
+            guard let targetDate = calendar.date(byAdding: .day, value: -dayOffset, to: now) else { continue }
+            let startOfDay = calendar.startOfDay(for: targetDate)
+            
+            let dayLogs = logs.filter { log in
+                calendar.isDate(log.timestamp, inSameDayAs: startOfDay)
+            }
+            
+            for log in dayLogs {
+                let outlierInfo = checkIfOutlier(
+                    eventType: log.eventType,
+                    timestamp: log.timestamp,
+                    thresholdMinutes: thresholdMinutes,
+                    days: days
+                )
+                
+                if outlierInfo.isOutlier {
+                    outlierLogs.append(log)
+                }
+            }
+        }
+        
+        return outlierLogs
+    }
+    
+    // MARK: - Adaptive Learning & Feedback
+    
+    func getFeedbackSummary(for eventType: EventType, days: Int = 30) -> FeedbackSummary? {
+        let calendar = Calendar.current
+        let now = Date()
+        
+        // Get feedbacks for the past N days
+        var relevantFeedbacks: [RoutineSuccess] = []
+        for dayOffset in 0..<days {
+            guard let targetDate = calendar.date(byAdding: .day, value: -dayOffset, to: now) else { continue }
+            let startOfDay = calendar.startOfDay(for: targetDate)
+            
+            let dayFeedbacks = feedbacks.filter { feedback in
+                calendar.isDate(feedback.timestamp, inSameDayAs: startOfDay) && feedback.eventType == eventType
+            }
+            
+            relevantFeedbacks.append(contentsOf: dayFeedbacks)
+        }
+        
+        guard !relevantFeedbacks.isEmpty else { return nil }
+        
+        let successCount = relevantFeedbacks.filter { $0.wasSuccessful }.count
+        let failureCount = relevantFeedbacks.count - successCount
+        let successRate = Double(successCount) / Double(relevantFeedbacks.count)
+        
+        let totalAdjustment = relevantFeedbacks.map { $0.adjustmentApplied }.reduce(0, +)
+        let averageAdjustment = relevantFeedbacks.isEmpty ? 0 : totalAdjustment / relevantFeedbacks.count
+        
+        let lastFeedback = relevantFeedbacks.sorted { $0.timestamp > $1.timestamp }.first
+        
+        return FeedbackSummary(
+            eventType: eventType,
+            totalAttempts: relevantFeedbacks.count,
+            successCount: successCount,
+            failureCount: failureCount,
+            successRate: successRate,
+            averageAdjustment: averageAdjustment,
+            lastFeedback: lastFeedback
+        )
+    }
+    
+    func getAdaptiveAdjustment(
+        for eventType: EventType,
+        baseTime: Date,
+        days: Int = 7
+    ) -> AdaptiveAdjustment? {
+        guard let feedbackSummary = getFeedbackSummary(for: eventType, days: days) else {
+            return nil
+        }
+        
+        // Calculate adjustment based on success rate
+        var adjustmentMinutes = 0
+        var reason = ""
+        var confidence = 0.0
+        
+        if feedbackSummary.totalAttempts < 3 {
+            // Not enough data
+            return nil
+        }
+        
+        if feedbackSummary.successRate < 0.5 {
+            // Less than 50% success - need significant adjustment
+            adjustmentMinutes = -10 // 10 minutes earlier
+            reason = "Adjusting earlier due to low success rate (\(feedbackSummary.successPercentage)%)"
+            confidence = 0.8
+        } else if feedbackSummary.successRate < 0.7 {
+            // 50-70% success - moderate adjustment
+            adjustmentMinutes = -5 // 5 minutes earlier
+            reason = "Fine-tuning based on recent misses"
+            confidence = 0.6
+        } else if feedbackSummary.successRate >= 0.9 {
+            // >90% success - might be able to leave later
+            if feedbackSummary.totalAttempts >= 10 {
+                adjustmentMinutes = 2 // 2 minutes later (cautious)
+                reason = "High success rate allows slight optimization"
+                confidence = 0.5
+            } else {
+                adjustmentMinutes = 0
+                reason = "Maintaining current schedule (working well)"
+                confidence = 0.9
+            }
+        } else {
+            // 70-90% success - no change needed
+            adjustmentMinutes = 0
+            reason = "Current schedule is working well"
+            confidence = 0.8
+        }
+        
+        let calendar = Calendar.current
+        guard let adjustedTime = calendar.date(
+            byAdding: .minute,
+            value: adjustmentMinutes,
+            to: baseTime
+        ) else {
+            return nil
+        }
+        
+        return AdaptiveAdjustment(
+            eventType: eventType,
+            originalTime: baseTime,
+            adjustedTime: adjustedTime,
+            adjustmentMinutes: adjustmentMinutes,
+            reason: reason,
+            confidence: confidence
+        )
+    }
+    
+    func getRecentAdjustment(for eventType: EventType) -> AdaptiveAdjustment? {
+        // Get the most recent feedback
+        let recentFeedbacks = feedbacks
+            .filter { $0.eventType == eventType }
+            .sorted { $0.timestamp > $1.timestamp }
+        
+        guard let lastFeedback = recentFeedbacks.first else { return nil }
+        
+        // Check if it was within the last 24 hours
+        let hoursAgo = Date().timeIntervalSince(lastFeedback.timestamp) / 3600
+        guard hoursAgo <= 24 else { return nil }
+        
+        // If it was a miss, return adjustment info
+        if !lastFeedback.wasSuccessful {
+            let adjustmentMinutes = -5 // Default 5 min earlier
+            let calendar = Calendar.current
+            let now = Date()
+            
+            guard let adjustedTime = calendar.date(
+                byAdding: .minute,
+                value: adjustmentMinutes,
+                to: now
+            ) else {
+                return nil
+            }
+            
+            return AdaptiveAdjustment(
+                eventType: eventType,
+                originalTime: now,
+                adjustedTime: adjustedTime,
+                adjustmentMinutes: adjustmentMinutes,
+                reason: "Based on yesterday's feedback",
+                confidence: 0.7
+            )
+        }
+        
+        return nil
+    }
+    
+    func getAllFeedbackSummaries(days: Int = 30) -> [FeedbackSummary] {
+        // Get feedback summaries for commute-related events
+        let commuteEvents: [EventType] = [
+            .leavingHome,
+            .boardingBus,
+            .boardingSubway,
+            .boardingReturnBus,
+            .boardingReturnSubway
+        ]
+        
+        return commuteEvents.compactMap { getFeedbackSummary(for: $0, days: days) }
     }
 }
 
