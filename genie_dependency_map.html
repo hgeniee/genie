@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>genie - Dependency Map</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            font-weight: 700;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            font-size: 1.1em;
+            opacity: 0.9;
+        }
+        
+        .controls {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        
+        .view-toggle {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .view-toggle button {
+            padding: 10px 20px;
+            border: 2px solid #667eea;
+            background: white;
+            color: #667eea;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+        
+        .view-toggle button.active {
+            background: #667eea;
+            color: white;
+        }
+        
+        .view-toggle button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+        }
+        
+        #graph {
+            width: 100%;
+            height: 700px;
+            background: white;
+        }
+        
+        .node {
+            cursor: pointer;
+        }
+        
+        .node circle {
+            stroke-width: 3px;
+            transition: all 0.3s;
+        }
+        
+        .node:hover circle {
+            stroke-width: 5px;
+            filter: brightness(1.1);
+        }
+        
+        .node text {
+            font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', sans-serif;
+            font-size: 13px;
+            font-weight: 600;
+            pointer-events: none;
+            text-anchor: middle;
+        }
+        
+        .link {
+            fill: none;
+            stroke-width: 2px;
+            opacity: 0.6;
+            transition: all 0.3s;
+        }
+        
+        .link:hover {
+            opacity: 1;
+            stroke-width: 3px;
+        }
+        
+        .link-label {
+            font-size: 11px;
+            fill: #666;
+            pointer-events: none;
+            font-weight: 500;
+        }
+        
+        .legend {
+            padding: 20px 30px;
+            background: #f8f9fa;
+            border-top: 1px solid #e0e0e0;
+        }
+        
+        .legend h3 {
+            margin-bottom: 15px;
+            color: #333;
+        }
+        
+        .legend-items {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            border: 2px solid #333;
+        }
+        
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.9);
+            color: white;
+            padding: 12px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.3s;
+            max-width: 300px;
+            z-index: 1000;
+        }
+        
+        .tooltip.show {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧞 genie Dependency Map</h1>
+            <p>Personal Life-Pattern Analyzer & Routine Optimizer</p>
+        </div>
+        
+        <div class="controls">
+            <div class="view-toggle">
+                <button class="active" onclick="showView('components')">Component View</button>
+                <button onclick="showView('phases')">Phase View</button>
+                <button onclick="showView('technical')">Technical Stack</button>
+            </div>
+        </div>
+        
+        <svg id="graph"></svg>
+        
+        <div class="legend">
+            <h3>Legend</h3>
+            <div class="legend-items">
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #667eea;"></div>
+                    <span>Core Components</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #f093fb;"></div>
+                    <span>Data Layer</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #4facfe;"></div>
+                    <span>UI Components</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #43e97b;"></div>
+                    <span>Features</span>
+                </div>
+                <div class="legend-item">
+                    <div class="legend-color" style="background: #fa709a;"></div>
+                    <span>Analysis Engine</span>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="tooltip"></div>
+
+    <script>
+        const views = {
+            components: {
+                nodes: [
+                    // Core App
+                    { id: 'app', label: 'genie App', type: 'core', description: 'Main SwiftUI App entry point' },
+                    
+                    // Data Models
+                    { id: 'routineLog', label: 'RoutineLog Model', type: 'data', description: 'SwiftData model storing event type & timestamp' },
+                    { id: 'swiftData', label: 'SwiftData Container', type: 'data', description: 'Local persistence layer' },
+                    
+                    // Views - Phase 1
+                    { id: 'logDashboard', label: 'Log Dashboard', type: 'ui', description: 'Main logging interface with 11 event types' },
+                    { id: 'eventButton', label: 'Event Log Button', type: 'ui', description: 'One-tap timestamp logging' },
+                    
+                    // Views - Phase 2
+                    { id: 'analysisView', label: 'Analysis View', type: 'feature', description: 'Pattern visualization & insights' },
+                    { id: 'correlationEngine', label: 'Correlation Engine', type: 'analysis', description: 'Finds patterns in logged data' },
+                    
+                    // Views - Phase 3
+                    { id: 'routineSuggestion', label: 'Routine Suggestion', type: 'feature', description: 'Optimal routine recommendations' },
+                    { id: 'optimizedSchedule', label: 'Optimized Schedule', type: 'feature', description: 'Activated daily schedule' },
+                    
+                    // Supporting Components
+                    { id: 'navStack', label: 'Navigation Stack', type: 'ui', description: 'App navigation structure' },
+                    { id: 'sfSymbols', label: 'SF Symbols', type: 'ui', description: 'Apple system icons' }
+                ],
+                links: [
+                    { source: 'app', target: 'swiftData', label: 'manages' },
+                    { source: 'app', target: 'navStack', label: 'contains' },
+                    { source: 'navStack', target: 'logDashboard', label: 'displays' },
+                    { source: 'logDashboard', target: 'eventButton', label: 'includes' },
+                    { source: 'eventButton', target: 'routineLog', label: 'creates' },
+                    { source: 'routineLog', target: 'swiftData', label: 'persisted by' },
+                    { source: 'logDashboard', target: 'sfSymbols', label: 'uses' },
+                    { source: 'routineLog', target: 'correlationEngine', label: 'analyzed by' },
+                    { source: 'correlationEngine', target: 'analysisView', label: 'powers' },
+                    { source: 'navStack', target: 'analysisView', label: 'navigates to' },
+                    { source: 'correlationEngine', target: 'routineSuggestion', label: 'generates' },
+                    { source: 'routineSuggestion', target: 'optimizedSchedule', label: 'activates' },
+                    { source: 'navStack', target: 'routineSuggestion', label: 'navigates to' }
+                ]
+            },
+            phases: {
+                nodes: [
+                    // Phase 1
+                    { id: 'phase1', label: 'Phase 1: Data Collection', type: 'core', description: 'Week 1: Manual timestamp logging' },
+                    { id: 'p1_logging', label: '11 Daily Events', type: 'feature', description: 'Wake-up, Leaving Home, Bus, Subway, etc.' },
+                    { id: 'p1_interface', label: 'Logging Interface', type: 'ui', description: 'One-tap timestamp recording' },
+                    { id: 'p1_storage', label: 'SwiftData Storage', type: 'data', description: 'Local persistence of logs' },
+                    
+                    // Phase 2
+                    { id: 'phase2', label: 'Phase 2: Pattern Analysis', type: 'core', description: 'Week 2+: Find correlations' },
+                    { id: 'p2_algorithm', label: 'Analysis Algorithm', type: 'analysis', description: 'Calculate averages & patterns' },
+                    { id: 'p2_insights', label: 'Trend Detection', type: 'analysis', description: 'Find time correlations' },
+                    { id: 'p2_viz', label: 'Pattern Visualization', type: 'ui', description: 'Display insights to user' },
+                    
+                    // Phase 3
+                    { id: 'phase3', label: 'Phase 3: Optimization', type: 'core', description: 'Ongoing: Routine suggestions' },
+                    { id: 'p3_optimal', label: 'Optimal Routine', type: 'feature', description: 'AI-suggested schedule' },
+                    { id: 'p3_activation', label: 'Schedule Activation', type: 'feature', description: 'Set as daily routine' },
+                    { id: 'p3_notifications', label: 'Smart Reminders', type: 'feature', description: 'Time-based alerts' }
+                ],
+                links: [
+                    // Phase 1 internals
+                    { source: 'phase1', target: 'p1_logging', label: 'tracks' },
+                    { source: 'phase1', target: 'p1_interface', label: 'provides' },
+                    { source: 'p1_interface', target: 'p1_storage', label: 'saves to' },
+                    
+                    // Phase 1 -> 2
+                    { source: 'phase1', target: 'phase2', label: 'enables' },
+                    { source: 'p1_storage', target: 'p2_algorithm', label: 'feeds' },
+                    
+                    // Phase 2 internals
+                    { source: 'phase2', target: 'p2_algorithm', label: 'runs' },
+                    { source: 'p2_algorithm', target: 'p2_insights', label: 'discovers' },
+                    { source: 'p2_insights', target: 'p2_viz', label: 'displayed in' },
+                    
+                    // Phase 2 -> 3
+                    { source: 'phase2', target: 'phase3', label: 'informs' },
+                    { source: 'p2_insights', target: 'p3_optimal', label: 'generates' },
+                    
+                    // Phase 3 internals
+                    { source: 'phase3', target: 'p3_optimal', label: 'suggests' },
+                    { source: 'p3_optimal', target: 'p3_activation', label: 'can activate' },
+                    { source: 'p3_activation', target: 'p3_notifications', label: 'triggers' }
+                ]
+            },
+            technical: {
+                nodes: [
+                    // Platform
+                    { id: 'ios', label: 'iOS Platform', type: 'core', description: 'Target platform' },
+                    { id: 'xcode', label: 'Xcode', type: 'core', description: 'Development environment' },
+                    { id: 'github', label: 'GitHub Repository', type: 'core', description: 'Version control' },
+                    
+                    // Frameworks
+                    { id: 'swiftui', label: 'SwiftUI', type: 'ui', description: 'UI framework' },
+                    { id: 'swiftdata', label: 'SwiftData', type: 'data', description: 'Persistence framework' },
+                    
+                    // UI Components
+                    { id: 'navstack', label: 'NavigationStack', type: 'ui', description: 'Navigation structure' },
+                    { id: 'list', label: 'List/LazyVStack', type: 'ui', description: 'Event list layouts' },
+                    { id: 'sfsymbols', label: 'SF Symbols', type: 'ui', description: 'System icons' },
+                    
+                    // Data Layer
+                    { id: 'model', label: 'RoutineLog Model', type: 'data', description: '@Model class with eventType & timestamp' },
+                    { id: 'modelcontainer', label: 'ModelContainer', type: 'data', description: 'SwiftData container' },
+                    { id: 'modelcontext', label: 'ModelContext', type: 'data', description: 'Data context for CRUD operations' },
+                    
+                    // Design System
+                    { id: 'design', label: 'Design System', type: 'ui', description: 'Minimalist Apple aesthetic' },
+                    { id: 'typography', label: 'SF Pro Typography', type: 'ui', description: 'Clean typography' },
+                    { id: 'spacing', label: 'Generous Spacing', type: 'ui', description: 'White space & rounded cards' }
+                ],
+                links: [
+                    // Development tools
+                    { source: 'xcode', target: 'ios', label: 'builds for' },
+                    { source: 'xcode', target: 'github', label: 'commits to' },
+                    
+                    // Framework dependencies
+                    { source: 'ios', target: 'swiftui', label: 'includes' },
+                    { source: 'ios', target: 'swiftdata', label: 'includes' },
+                    { source: 'swiftui', target: 'navstack', label: 'provides' },
+                    { source: 'swiftui', target: 'list', label: 'provides' },
+                    { source: 'swiftui', target: 'sfsymbols', label: 'integrates' },
+                    
+                    // Data layer
+                    { source: 'swiftdata', target: 'model', label: 'defines' },
+                    { source: 'swiftdata', target: 'modelcontainer', label: 'manages via' },
+                    { source: 'modelcontainer', target: 'modelcontext', label: 'provides' },
+                    { source: 'modelcontext', target: 'model', label: 'performs CRUD on' },
+                    
+                    // UI -> Data
+                    { source: 'navstack', target: 'modelcontext', label: 'accesses' },
+                    { source: 'list', target: 'model', label: 'displays' },
+                    
+                    // Design system
+                    { source: 'design', target: 'typography', label: 'uses' },
+                    { source: 'design', target: 'spacing', label: 'applies' },
+                    { source: 'design', target: 'sfsymbols', label: 'incorporates' },
+                    { source: 'swiftui', target: 'design', label: 'styled by' }
+                ]
+            }
+        };
+
+        let currentView = 'components';
+        let simulation;
+        
+        const svg = d3.select('#graph');
+        const width = svg.node().getBoundingClientRect().width;
+        const height = 700;
+        
+        const tooltip = d3.select('.tooltip');
+        
+        const colors = {
+            core: '#667eea',
+            data: '#f093fb',
+            ui: '#4facfe',
+            feature: '#43e97b',
+            analysis: '#fa709a'
+        };
+
+        function showView(viewName) {
+            currentView = viewName;
+            document.querySelectorAll('.view-toggle button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            renderGraph();
+        }
+
+        function renderGraph() {
+            svg.selectAll('*').remove();
+            
+            const data = views[currentView];
+            
+            const g = svg.append('g');
+            
+            // Add zoom behavior
+            const zoom = d3.zoom()
+                .scaleExtent([0.5, 3])
+                .on('zoom', (event) => {
+                    g.attr('transform', event.transform);
+                });
+            
+            svg.call(zoom);
+            
+            simulation = d3.forceSimulation(data.nodes)
+                .force('link', d3.forceLink(data.links).id(d => d.id).distance(150))
+                .force('charge', d3.forceManyBody().strength(-800))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collision', d3.forceCollide().radius(60));
+            
+            // Create arrow markers
+            svg.append('defs').selectAll('marker')
+                .data(['arrow'])
+                .enter().append('marker')
+                .attr('id', d => d)
+                .attr('viewBox', '0 -5 10 10')
+                .attr('refX', 35)
+                .attr('refY', 0)
+                .attr('markerWidth', 6)
+                .attr('markerHeight', 6)
+                .attr('orient', 'auto')
+                .append('path')
+                .attr('d', 'M0,-5L10,0L0,5')
+                .attr('fill', '#999');
+            
+            // Draw links
+            const link = g.append('g')
+                .selectAll('path')
+                .data(data.links)
+                .enter().append('path')
+                .attr('class', 'link')
+                .attr('stroke', '#999')
+                .attr('marker-end', 'url(#arrow)');
+            
+            // Draw link labels
+            const linkLabel = g.append('g')
+                .selectAll('text')
+                .data(data.links)
+                .enter().append('text')
+                .attr('class', 'link-label')
+                .text(d => d.label);
+            
+            // Draw nodes
+            const node = g.append('g')
+                .selectAll('g')
+                .data(data.nodes)
+                .enter().append('g')
+                .attr('class', 'node')
+                .call(d3.drag()
+                    .on('start', dragStarted)
+                    .on('drag', dragged)
+                    .on('end', dragEnded))
+                .on('mouseover', function(event, d) {
+                    tooltip.html(`<strong>${d.label}</strong><br>${d.description}`)
+                        .style('left', (event.pageX + 10) + 'px')
+                        .style('top', (event.pageY - 10) + 'px')
+                        .classed('show', true);
+                })
+                .on('mouseout', function() {
+                    tooltip.classed('show', false);
+                });
+            
+            node.append('circle')
+                .attr('r', 25)
+                .attr('fill', d => colors[d.type])
+                .attr('stroke', '#fff');
+            
+            node.append('text')
+                .attr('dy', 40)
+                .text(d => d.label)
+                .style('fill', '#333');
+            
+            simulation.on('tick', () => {
+                link.attr('d', d => {
+                    const dx = d.target.x - d.source.x;
+                    const dy = d.target.y - d.source.y;
+                    const dr = Math.sqrt(dx * dx + dy * dy);
+                    return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
+                });
+                
+                linkLabel
+                    .attr('x', d => (d.source.x + d.target.x) / 2)
+                    .attr('y', d => (d.source.y + d.target.y) / 2);
+                
+                node.attr('transform', d => `translate(${d.x},${d.y})`);
+            });
+        }
+
+        function dragStarted(event, d) {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+        }
+
+        function dragged(event, d) {
+            d.fx = event.x;
+            d.fy = event.y;
+        }
+
+        function dragEnded(event, d) {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+        }
+
+        // Initial render
+        renderGraph();
+    </script>
+</body>
+</html>
