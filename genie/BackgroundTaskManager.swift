@@ -9,6 +9,7 @@ import Foundation
 import BackgroundTasks
 import SwiftData
 import UserNotifications
+import Combine
 
 // MARK: - Background Task Manager
 
@@ -132,7 +133,7 @@ class BackgroundTaskManager: ObservableObject {
     private func analyzeYesterdayData() async {
         // Quick analysis without heavy computation
         do {
-            let container = try ModelContainer(for: [RoutineLog.self, RoutineSuccess.self])
+            let container = try ModelContainer(for: RoutineLog.self, RoutineSuccess.self)
             let context = ModelContext(container)
             
             let calendar = Calendar.current
@@ -237,9 +238,9 @@ class BackgroundTaskManager: ObservableObject {
             // Apply adjustments
             suggestions = suggestions.map { suggestion in
                 if let adjustment = adjustments[suggestion.eventType],
-                   adjustment != 0,
-                   let originalTime = suggestion.suggestedTime {
+                   adjustment != 0 {
                     
+                    let originalTime = suggestion.suggestedTime
                     let calendar = Calendar.current
                     if let adjustedTime = calendar.date(
                         byAdding: .minute,
@@ -276,7 +277,7 @@ class BackgroundTaskManager: ObservableObject {
     private func cleanupOldData() async {
         // Remove old data to keep database small (optional)
         do {
-            let container = try ModelContainer(for: [RoutineLog.self, RoutineSuccess.self])
+            let container = try ModelContainer(for: RoutineLog.self, RoutineSuccess.self)
             let context = ModelContext(container)
             
             // Delete logs older than 90 days (configurable)

@@ -8,6 +8,7 @@
 import Foundation
 import UserNotifications
 import SwiftData
+import Combine
 
 // MARK: - Notification Categories & Actions
 
@@ -163,12 +164,12 @@ class NotificationManager: NSObject, ObservableObject {
             guard suggestion.confidence > 0.6 else { continue } // Only high confidence
             
             // Schedule notification 5 minutes before suggested time
-            guard let suggestedTime = suggestion.suggestedTime,
-                  let notificationTime = calendar.date(
-                    byAdding: .minute,
-                    value: -5,
-                    to: suggestedTime
-                  ) else { continue }
+            let suggestedTime = suggestion.suggestedTime
+            guard let notificationTime = calendar.date(
+                byAdding: .minute,
+                value: -5,
+                to: suggestedTime
+            ) else { continue }
             
             // Create notification content
             let content = UNMutableNotificationContent()
